@@ -234,6 +234,27 @@ void test_trip_reported() {
   TEST_ASSERT_EQUAL(4, err["pin"].as<int>());
 }
 
+// The command log only prints: what the board does and answers is the same either way.
+void test_command_log_changes_nothing() {
+  fake::verbose = true;
+  pairAndConnect(1);
+  text(1, R"({"t":"config","outputs":[{"pin":4}]})");
+
+  for (bool on : {true, false}) {
+    session->setCommandLog(on);
+    TEST_ASSERT_EQUAL(on, session->commandLog());
+
+    text(1, R"({"t":"set","pin":25,"on":true,"ms":500})");
+    TEST_ASSERT_EQUAL_STRING("bad-pin", last(1)["code"]);
+
+    text(1, R"({"t":"pulse","pin":4,"onMs":200,"offMs":100,"count":2})");
+    TEST_ASSERT_TRUE(outputs.isOn(4));
+    text(1, R"({"t":"stop"})");
+    TEST_ASSERT_FALSE(outputs.isOn(4));
+  }
+  fake::verbose = false;
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_commands_before_hello_are_refused);
@@ -253,5 +274,6 @@ int main() {
   RUN_TEST(test_unpair_from_app);
   RUN_TEST(test_repairing_drops_old_session);
   RUN_TEST(test_trip_reported);
+  RUN_TEST(test_command_log_changes_nothing);
   return UNITY_END();
 }

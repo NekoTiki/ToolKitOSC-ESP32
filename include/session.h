@@ -58,6 +58,11 @@ class Session {
   bool connected() const { return current_ != kNoClient; }
   bool pairingActive() const { return pairingClient_ != kNoClient; }
 
+  // "[cmd] ..." lines for every set/pulse/pwm/stop received. Holds renew every 500 ms, so the
+  // `log off` serial command can silence them. On by default.
+  void setCommandLog(bool on) { commandLog_ = on; }
+  bool commandLog() const { return commandLog_; }
+
  private:
   void startPairing(uint32_t client);
   void hello(uint32_t client, JsonObjectConst msg);
@@ -69,6 +74,8 @@ class Session {
   void send(uint32_t client, const char* json);
   void close(uint32_t client, uint16_t code);
   void persist();
+  void logCommand(const char* fmt, ...) __attribute__((format(printf, 2, 3)));
+  void logRefused(const char* code);
   bool allowed(uint8_t pin) const;
 
   Settings& settings_;
@@ -80,6 +87,7 @@ class Session {
   SendFn send_ = nullptr;
   CloseFn close_ = nullptr;
   PersistFn persist_ = nullptr;
+  bool commandLog_ = true;
 
   uint32_t current_ = kNoClient;
   uint32_t lastSeen_ = 0;

@@ -1,5 +1,7 @@
 #include "session.h"
 
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "config.h"
@@ -205,6 +207,7 @@ void Session::handleCommand(uint32_t client, const char* type, JsonObjectConst m
   }
 
   if (strcmp(type, "stop") == 0) {
+    logCommand("stop");
     outputs_.stop();
     return;
   }
@@ -223,27 +226,64 @@ void Session::handleCommand(uint32_t client, const char* type, JsonObjectConst m
 
   JsonVariantConst pinValue = msg["pin"];
   if (!pinValue.is<uint8_t>()) {
+    logCommand("%s", type);
+    logRefused("bad-msg");
     sendError(client, "bad-msg", type);
     return;
   }
   uint8_t pin = pinValue.as<uint8_t>();
 
+  // Each command is logged before it runs, so its "[out]" lines come right after it.
+  OutputError result;
   if (strcmp(type, "set") == 0) {
-    if (!msg["on"].is<bool>()) return sendError(client, "bad-msg", type, pin);
-    bool on = msg["on"];
-    if (on && !isCount(msg["ms"])) return sendError(client, "bad-msg", type, pin);
-    sendResult(client, outputs_.set(pin, on, msg["ms"] | 0u), type, pin);
+    bool valid = msg["on"].is<bool>() && (!msg["on"].as<bool>() || isCount(msg["ms"]));
+    bool on = msg["on"] | false;
+    uint32_t ms = msg["ms"] | 0u;
+
+    if (on) {
+      logCommand("set GPIO %u on %u ms", (unsigned)pin, (unsigned)ms);
+    } else {
+      logCommand("set GPIO %u off", (unsigned)pin);
+    }
+    if (!valid) {
+      logRefused("bad-msg");
+      return sendError(client, "bad-msg", type, pin);
+    }
+    result = outputs_.set(pin, on, ms);
   } else if (strcmp(type, "pulse") == 0) {
-    if (!isCount(msg["onMs"])) return sendError(client, "bad-msg", type, pin);
+    uint32_t onMs = msg["onMs"] | 0u;
     uint32_t offMs = msg["offMs"] | 0u;
     uint32_t count = msg["count"] | 1u;
-    sendResult(client, outputs_.pulse(pin, msg["onMs"], offMs, count), type, pin);
+
+    if (count > 1) {
+      logCommand("pulse GPIO %u %u ms x %u, %u ms apart", (unsigned)pin, (unsigned)onMs, (unsigned)count,
+                 (unsigned)offMs);
+    } else {
+      logCommand("pulse GPIO %u %u ms", (unsigned)pin, (unsigned)onMs);
+    }
+    if (!isCount(msg["onMs"])) {
+      logRefused("bad-msg");
+      return sendError(client, "bad-msg", type, pin);
+    }
+    result = outputs_.pulse(pin, onMs, offMs, count);
   } else if (strcmp(type, "pwm") == 0) {
-    if (!isNumber(msg["duty"]) || !isCount(msg["ms"])) return sendError(client, "bad-msg", type, pin);
-    sendResult(client, outputs_.pwm(pin, msg["duty"].as<float>(), msg["ms"]), type, pin);
+    float duty = msg["duty"] | 0.0f;
+    uint32_t ms = msg["ms"] | 0u;
+
+    logCommand("pwm GPIO %u %d %% for %u ms", (unsigned)pin, (int)(duty * 100.0f + 0.5f), (unsigned)ms);
+    if (!isNumber(msg["duty"]) || !isCount(msg["ms"])) {
+      logRefused("bad-msg");
+      return sendError(client, "bad-msg", type, pin);
+    }
+    result = outputs_.pwm(pin, duty, ms);
   } else {
-    sendError(client, "bad-msg", type);
+    logCommand("%s", type);
+    logRefused("bad-msg");
+    return sendError(client, "bad-msg", type);
   }
+
+  if (errorCode(result)) logRefused(errorCode(result));
+  sendResult(client, result, type, pin);
 }
 
 void Session::configure(uint32_t client, JsonObjectConst msg) {
@@ -316,6 +356,21 @@ void Session::close(uint32_t client, uint16_t code) {
 
 void Session::persist() {
   if (persist_) persist_();
+}
+
+void Session::logCommand(const char* fmt, ...) {
+  if (!commandLog_) return;
+
+  char line[128];
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(line, sizeof(line), fmt, args);
+  va_end(args);
+  hal::log("[cmd] %s\n", line);
+}
+
+void Session::logRefused(const char* code) {
+  if (commandLog_) hal::log("[cmd]   -> refused (%s)\n", code);
 }
 
 bool Session::allowed(uint8_t pin) const {

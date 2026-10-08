@@ -275,6 +275,7 @@ void printStatus() {
   hal::log("  board    %s\n", device.board);
   hal::log("  paired   %s\n", session && session->paired() ? "yes" : "no");
   hal::log("  app      %s\n", session && session->connected() ? "connected" : "not connected");
+  hal::log("  cmd log  %s\n", !session || session->commandLog() ? "on" : "off");
   if (WiFi.status() == WL_CONNECTED) {
     hal::log("  network  %s, ws://%s:%u%s (%s.local)\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str(),
              WS_PORT, WS_PATH, hostname);
@@ -542,7 +543,19 @@ void initLeds() {
 // Serial commands
 
 void printHelp() {
-  hal::log("Commands: status, pins, boards, name <text>, board <id>, unpair, reset, restart, help\n");
+  hal::log("Commands: status, pins, boards, name <text>, board <id>, log on|off, unpair, reset, restart, help\n");
+}
+
+// Every real change of an output pin. Always on: lease renewals that keep a pin on change nothing,
+// so this stays quiet even while a hold runs.
+void logOutput(uint8_t pin, bool on, float duty) {
+  if (!on) {
+    hal::log("[out] GPIO %u off\n", (unsigned)pin);
+  } else if (duty >= 0.995f) {
+    hal::log("[out] GPIO %u on\n", (unsigned)pin);
+  } else {
+    hal::log("[out] GPIO %u at %d %%\n", (unsigned)pin, (int)(duty * 100.0f + 0.5f));
+  }
 }
 
 void runCommand(char* line) {
@@ -571,6 +584,9 @@ void runCommand(char* line) {
     saveSettings();
     hal::log("[setup] board profile saved, restarting\n");
     restartAt = millis() + 500;
+  } else if (strcmp(line, "log") == 0) {
+    if (arg && (strcmp(arg, "on") == 0 || strcmp(arg, "off") == 0)) session->setCommandLog(strcmp(arg, "on") == 0);
+    hal::log("[setup] command log is %s (\"log on\" / \"log off\")\n", session->commandLog() ? "on" : "off");
   } else if (strcmp(line, "unpair") == 0) {
     session->unpair();
   } else if (strcmp(line, "reset") == 0) {
@@ -616,8 +632,14 @@ void setup() {
   resolvePins();
 
   // Outputs off before anything else, Wi-Fi included.
-  outputs.setCallbacks([](uint8_t pin, bool on, float duty) { session->reportOutput(pin, on, duty); },
-                       [](uint8_t pin) { session->reportTrip(pin); });
+  outputs.setCallbacks(
+      [](uint8_t pin, bool on, float duty) {
+        logOutput(pin, on, duty);
+        if (session) session->reportOutput(pin, on, duty);
+      },
+      [](uint8_t pin) {
+        if (session) session->reportTrip(pin);
+      });
   outputs.configure(settings.outputs, settings.outputCount);
 
   device = {deviceId, chipName(module.chip), board ? board->name : "Generic"};

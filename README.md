@@ -196,7 +196,20 @@ If the board loses Wi-Fi for 3 minutes it reopens the setup network, but keeps i
 The native tests need a MinGW-w64 GCC on `PATH` on Windows.
 
 Serial commands at 115200 baud: `status`, `pins`, `boards`, `name <text>`, `board <id>`,
-`unpair`, `reset`, `restart`, `help`.
+`log on|off`, `unpair`, `reset`, `restart`, `help`.
+
+The serial monitor shows what the board is told and what it does:
+
+```text
+[cmd] pulse GPIO 4 1000 ms x 2, 500 ms apart    a command from ToolKitOSC
+[out] GPIO 4 on                                 a pin really changing
+[out] GPIO 4 off
+[cmd] set GPIO 4 on 1500 ms
+[cmd]   -> refused (max-on)                     why the board didn't do it
+```
+
+Holds and dimming resend their command every 500 ms, so `log off` hides the `[cmd]` lines.
+`[out]` lines always show.
 
 Libraries: [ArduinoJson](https://arduinojson.org/),
 [ESPAsyncWebServer and AsyncTCP](https://github.com/ESP32Async) and
